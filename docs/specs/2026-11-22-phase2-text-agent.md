@@ -184,5 +184,6 @@ Live evaluation on 2026-11-22: the 6 scripted conversations (11 turns), run on t
   partly ignored it. Consider a code-level confirmation step before Phase 3, where speech-recognition errors
   make confirmation matter more.
 - Groq's TPM limit caps throughput to about one call at a time on the free tier.
-- Clinic details are a Python constant (`clinic.py`). They should move to a config file so a different
-  clinic doesn't need code changes.
+- ~~Clinic details hardcoded in `clinic.py`~~ **Resolved:** moved to `backend/config/clinic.yaml`
+  (validated `ClinicProfile`, per-doctor working days, configurable phone length, ID prefix, emergency number
+  and timezone). Agent tuning limits moved to Settings.

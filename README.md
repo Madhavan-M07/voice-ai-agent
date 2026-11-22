@@ -53,6 +53,18 @@ Agent: Your appointment is booked. Booking ID SFC-7506. See you Monday the 23rd 
        [groq · openai/gpt-oss-20b · 778 ms · tools=['book_appointment']]
 ```
 
+### Configure your own clinic
+Nothing clinic-specific is in the code. Edit [`backend/config/clinic.yaml`](backend/config/clinic.yaml),
+or point `CLINIC_CONFIG_PATH` in `backend/.env` at your own copy. The file sets:
+- name, assistant name, address, phone, timezone, emergency number
+- opening hours and days, slot length, booking window
+- doctors, each with optional working days
+- services, fees, insurance
+- phone-number length and booking-ID prefix
+
+The file is validated at startup. A typo, an unknown timezone, or a doctor scheduled on a day the clinic is
+closed stops the app with a clear error.
+
 The demo clinic, "Sunrise Family Clinic", is fictional. Don't enter real patient data: conversation text is
 sent to Groq's API.
 

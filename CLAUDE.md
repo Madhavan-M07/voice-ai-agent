@@ -37,12 +37,17 @@ backend/src/voice_agent/
   ai/llm/       LLM providers (Groq primary, Ollama fallback) behind one Protocol
   ai/speech/    Silero VAD, faster-whisper STT, Piper/Kokoro TTS — each behind a Protocol
   storage/      SQLite transcripts + latency/inference metadata
+backend/config/clinic.yaml   the clinic profile (name, hours, doctors + days, fees, timezone...)
 backend/tests/  mirrors src layout
 frontend/       plain HTML/CSS/JS WebRTC client (desktop + mobile), served by FastAPI
 ```
 - Dependency rule: `api`/`rtc` → `pipeline` → `ai` → `storage`/`core`. Never the reverse. `ai/` never imports
   `api`, `rtc` or `pipeline`.
 - Providers swap via config, never via `if provider == ...` scattered through code.
+- **No business data in code.** Anything about a specific clinic (names, hours, doctors, fees, phone
+  format, booking-ID prefix, emergency number, timezone) belongs in `config/clinic.yaml`, validated by
+  `ClinicProfile`. Tuning knobs go in `core/config.py` Settings. Tests build clinics with `make_clinic()`
+  in `tests/fakes.py`, never by reading the shipped YAML.
 - Audio is async end-to-end: never block the event loop — run CPU-bound model calls in a thread/executor.
 
 ## How to work in this repo
