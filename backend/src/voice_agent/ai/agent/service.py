@@ -3,26 +3,21 @@
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime
 from time import perf_counter
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphRecursionError
 
-from voice_agent.ai.agent.clinic import CLINIC, ClinicProfile
+from voice_agent.ai.agent.clinic import ClinicProfile, load_clinic
 from voice_agent.ai.agent.graph import NO_PROVIDER, apology, build_graph
 from voice_agent.ai.agent.tools import build_tools
 from voice_agent.ai.llm.providers import compose_chat_model, create_chat_models
 from voice_agent.core.config import Settings
-from voice_agent.storage.appointments import SqliteAppointmentRepository
+from voice_agent.storage.appointments import SqliteAppointmentRepository, booking_id_factory
 
 logger = logging.getLogger(__name__)
-
-# One turn is at most ~5 agent/tool round trips; stops a model stuck in a tool-call loop.
-DEFAULT_RECURSION_LIMIT = 12
 
 
 @dataclass(frozen=True)
@@ -38,23 +33,32 @@ class ReceptionistAgent:
         self,
         graph: Any,
         *,
-        clinic: ClinicProfile = CLINIC,
-        recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+        clinic: ClinicProfile,
+        recursion_limit: int = 12,
     ) -> None:
         self._graph = graph
-        self._clinic = clinic
+        self.clinic = clinic
         self._recursion_limit = recursion_limit
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "ReceptionistAgent":
-        tz = ZoneInfo(settings.clinic_timezone)
-
-        def clock() -> datetime:  # naive local clinic time
-            return datetime.now(tz).replace(tzinfo=None)
-
-        tools = build_tools(SqliteAppointmentRepository(settings.clinic_db_path), clock)
+        """Wire the agent from settings + the clinic config file. Raises ClinicConfigError early."""
+        clinic = load_clinic(settings.clinic_config_path)
+        repo = SqliteAppointmentRepository(
+            settings.clinic_db_path, id_factory=booking_id_factory(clinic.booking_id_prefix)
+        )
+        tools = build_tools(
+            repo, clinic.now, clinic, max_slots_listed=settings.agent_max_slots_listed
+        )
         remote, local = create_chat_models(settings)
-        return cls(build_graph(compose_chat_model(remote, local, tools), tools, clock))
+        graph = build_graph(
+            compose_chat_model(remote, local, tools),
+            tools,
+            clinic.now,
+            clinic,
+            max_history_messages=settings.agent_max_history_messages,
+        )
+        return cls(graph, clinic=clinic, recursion_limit=settings.agent_recursion_limit)
 
     def _config(self, session_id: str) -> RunnableConfig:
         return {"configurable": {"thread_id": session_id}, "recursion_limit": self._recursion_limit}
@@ -67,7 +71,7 @@ class ReceptionistAgent:
             )
         except GraphRecursionError:
             logger.warning("Session %s hit the recursion limit", session_id)
-            return AgentReply(apology(self._clinic), NO_PROVIDER, _ms_since(start))
+            return AgentReply(apology(self.clinic), NO_PROVIDER, _ms_since(start))
         messages: list[BaseMessage] = state["messages"]
         return AgentReply(
             text=messages[-1].text,
@@ -92,7 +96,7 @@ class ReceptionistAgent:
                     yield chunk.text
         except GraphRecursionError:
             logger.warning("Session %s hit the recursion limit", session_id)
-            yield apology(self._clinic)
+            yield apology(self.clinic)
 
     async def last_provider(self, session_id: str) -> str:
         snapshot = await self._graph.aget_state(self._config(session_id))

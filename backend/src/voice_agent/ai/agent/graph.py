@@ -16,7 +16,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from voice_agent.ai.agent.clinic import CLINIC, ClinicProfile
+from voice_agent.ai.agent.clinic import ClinicProfile
 from voice_agent.ai.agent.prompts import build_system_prompt
 from voice_agent.ai.agent.state import ReceptionistState
 from voice_agent.ai.agent.tools import Clock
@@ -24,7 +24,6 @@ from voice_agent.ai.llm.providers import ChatRunnable, provider_of
 
 logger = logging.getLogger(__name__)
 
-MAX_HISTORY_MESSAGES = 30  # keeps prompts small and fast for the local 3B fallback
 NO_PROVIDER = "none"
 
 
@@ -39,7 +38,9 @@ def build_graph(
     llm: ChatRunnable,
     tools: Sequence[BaseTool],
     clock: Clock,
-    clinic: ClinicProfile = CLINIC,
+    clinic: ClinicProfile,
+    *,
+    max_history_messages: int = 30,
     checkpointer: BaseCheckpointSaver[str] | None = None,
 ) -> CompiledStateGraph[ReceptionistState, None, ReceptionistState, ReceptionistState]:
     async def agent(state: ReceptionistState) -> dict[str, object]:
@@ -47,7 +48,7 @@ def build_graph(
             state["messages"],
             strategy="last",
             token_counter=len,  # count messages, not tokens
-            max_tokens=MAX_HISTORY_MESSAGES,
+            max_tokens=max_history_messages,
             start_on="human",  # never start mid tool-call exchange
         )
         prompt = [SystemMessage(build_system_prompt(clock(), clinic)), *history]

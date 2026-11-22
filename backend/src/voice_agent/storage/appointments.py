@@ -37,12 +37,16 @@ class AppointmentRepository(Protocol):
     def cancel(self, booking_id: str) -> None: ...
 
 
-def new_booking_id() -> str:
-    return f"SFC-{secrets.randbelow(9000) + 1000}"
+def booking_id_factory(prefix: str) -> Callable[[], str]:
+    """Random IDs like 'SFC-4821'. The prefix comes from the clinic config."""
+    return lambda: f"{prefix}-{secrets.randbelow(9000) + 1000}"
+
+
+_DEFAULT_IDS = booking_id_factory("BK")
 
 
 class InMemoryAppointmentRepository:
-    def __init__(self, id_factory: Callable[[], str] = new_booking_id) -> None:
+    def __init__(self, id_factory: Callable[[], str] = _DEFAULT_IDS) -> None:
         self._items: dict[str, Appointment] = {}
         self._id_factory = id_factory
         self._lock = threading.Lock()
@@ -96,7 +100,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_active_slot
 class SqliteAppointmentRepository:
     """One short-lived connection per call: safe across the threads LangGraph runs tools in."""
 
-    def __init__(self, path: Path, id_factory: Callable[[], str] = new_booking_id) -> None:
+    def __init__(self, path: Path, id_factory: Callable[[], str] = _DEFAULT_IDS) -> None:
         self._path = path
         self._id_factory = id_factory
         path.parent.mkdir(parents=True, exist_ok=True)
