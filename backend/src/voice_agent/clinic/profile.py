@@ -1,25 +1,19 @@
-"""Clinic profile and appointment slot rules.
+"""Clinic profile: the validated model of `config/clinic.yaml`, and its loader.
 
-Nothing clinic-specific lives in code. The profile (name, hours, doctors, fees, timezone, etc.)
-is loaded from a YAML file (`CLINIC_CONFIG_PATH`, default `config/clinic.yaml`) and validated at
-startup, so a different clinic needs a different file, not a code change. The rest is pure logic.
+Nothing clinic-specific lives in code. Name, hours, doctors (with optional working days), fees,
+timezone, phone format, booking-ID prefix and emergency number all come from the YAML file chosen by
+`CLINIC_CONFIG_PATH`. The file is validated at startup so mistakes fail fast with a clear message.
 """
 
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Literal, Self
+from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-WEEKDAYS: tuple[Weekday, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-_DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-
-
-class SlotError(ValueError):
-    """A requested date/time cannot be booked. The message is safe to show the caller."""
+from voice_agent.clinic.time_utils import WEEKDAYS, Weekday, describe_days, spoken_time, weekday_of
 
 
 class ClinicConfigError(RuntimeError):
@@ -58,7 +52,7 @@ class ClinicProfile(_Model):
     )
     address: str
     phone: str
-    timezone: str = Field(description="IANA timezone, e.g. Asia/Kolkata")
+    timezone: str = Field(description="IANA timezone name")
     emergency_number: str
     booking_id_prefix: str = Field(pattern=r"^[A-Z]{2,5}$")
     phone_digits: int = Field(ge=7, le=15, description="Digits in a local phone number")
@@ -111,7 +105,7 @@ class ClinicProfile(_Model):
         return result
 
     def is_open_on(self, day: date) -> bool:
-        return WEEKDAYS[day.weekday()] in self.hours.days
+        return weekday_of(day) in self.hours.days
 
     # --- doctors ------------------------------------------------------------------------------
 
@@ -125,8 +119,11 @@ class ClinicProfile(_Model):
                 return doctor
         return None
 
+    def working_days(self, doctor: Doctor) -> list[Weekday]:
+        return doctor.days or self.hours.days
+
     def works_on(self, doctor: Doctor, day: date) -> bool:
-        return WEEKDAYS[day.weekday()] in (doctor.days or self.hours.days)
+        return weekday_of(day) in self.working_days(doctor)
 
     # --- spoken descriptions ------------------------------------------------------------------
 
@@ -140,6 +137,7 @@ class ClinicProfile(_Model):
         return describe_days(closed) if closed else None
 
     def info(self, topic: str) -> str:
+        """One spoken sentence about a topic. Used to build the system prompt's fact list."""
         hours = (
             f"{self.open_days}, {spoken_time(self.hours.open)} to {spoken_time(self.hours.close)}"
         )
@@ -170,7 +168,7 @@ def load_clinic(path: Path) -> ClinicProfile:
     except FileNotFoundError:
         raise ClinicConfigError(
             f"Clinic config not found: {path.resolve()}. "
-            "Create it (see config/clinic.yaml) or set CLINIC_CONFIG_PATH."
+            "Run from the backend/ folder, or set CLINIC_CONFIG_PATH in .env."
         ) from None
     except yaml.YAMLError as exc:
         raise ClinicConfigError(f"Clinic config {path} is not valid YAML: {exc}") from None
@@ -178,63 +176,3 @@ def load_clinic(path: Path) -> ClinicProfile:
         return ClinicProfile.model_validate(raw)
     except ValidationError as exc:
         raise ClinicConfigError(f"Clinic config {path} is invalid:\n{exc}") from None
-
-
-def describe_days(days: list[Weekday]) -> str:
-    """['mon'..'fri'] -> 'Monday to Friday'; ['mon','wed'] -> 'Monday and Wednesday'."""
-    idx = sorted(WEEKDAYS.index(d) for d in set(days))
-    names = [_DAY_NAMES[i] for i in idx]
-    if len(idx) > 2 and idx == list(range(idx[0], idx[-1] + 1)):
-        return f"{names[0]} to {names[-1]}"
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-
-
-def parse_date(value: str) -> date:
-    try:
-        return date.fromisoformat(value.strip())
-    except ValueError:
-        raise SlotError(f"'{value}' is not a valid date. Use YYYY-MM-DD.") from None
-
-
-def parse_time(value: str) -> time:
-    try:
-        return time.fromisoformat(value.strip())
-    except ValueError:
-        raise SlotError(f"'{value}' is not a valid time. Use 24-hour HH:MM, like 14:30.") from None
-
-
-def validate_date(day: date, now: datetime, clinic: ClinicProfile) -> None:
-    today = now.date()
-    if day < today:
-        raise SlotError(f"{day.isoformat()} is in the past.")
-    if not clinic.is_open_on(day):
-        raise SlotError(
-            f"The clinic is closed on {day.strftime('%A')}s. We are open {clinic.open_days} only."
-        )
-    if day > today + timedelta(days=clinic.booking_window_days):
-        raise SlotError(f"Bookings open only {clinic.booking_window_days} days ahead.")
-
-
-def validate_slot(
-    day: date, slot: time, now: datetime, clinic: ClinicProfile, doctor: Doctor | None = None
-) -> None:
-    validate_date(day, now, clinic)
-    if doctor is not None and not clinic.works_on(doctor, day):
-        raise SlotError(
-            f"{doctor.name} doesn't work on {day.strftime('%A')}s. "
-            f"{doctor.name} works {describe_days(doctor.days or clinic.hours.days)}."
-        )
-    if slot not in clinic.slots():
-        raise SlotError(
-            f"{spoken_time(slot)} is not a bookable time. Appointments start every "
-            f"{clinic.slot_minutes} minutes from {spoken_time(clinic.hours.open)}."
-        )
-    if day == now.date() and slot <= now.time():
-        raise SlotError(f"{spoken_time(slot)} today has already passed.")
-
-
-def spoken_time(t: time) -> str:
-    """'09:00' -> '9 AM', '14:30' -> '2:30 PM'. Reads naturally when spoken by TTS."""
-    hour = t.hour % 12 or 12
-    suffix = "AM" if t.hour < 12 else "PM"
-    return f"{hour} {suffix}" if t.minute == 0 else f"{hour}:{t.minute:02d} {suffix}"
