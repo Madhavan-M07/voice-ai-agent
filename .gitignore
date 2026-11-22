@@ -1,0 +1,47 @@
+# --- Claude Code: personal files (never commit) ---
+CLAUDE.local.md
+.claude/settings.local.json
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# --- Downloaded models & runtime data ---
+backend/models/
+backend/data/
+*.db
+*.sqlite3
+*.onnx
+*.wav
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- Node ---
+node_modules/
+.next/
+.turbo/
+coverage/
+*.log
