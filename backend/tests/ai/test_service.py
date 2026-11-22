@@ -24,21 +24,24 @@ def _agent(model: ScriptedChatModel, recursion_limit: int = 12) -> ReceptionistA
 
 async def test_reply_reports_text_provider_tools_and_latency() -> None:
     model = ScriptedChatModel(
-        script=[call_tool("clinic_info", {"topic": "fees"}), say("It's 500 rupees.")],
+        script=[
+            call_tool("check_availability", {"date": "2026-11-24"}),
+            say("Dr. Rao is free at 9 AM."),
+        ],
         label="groq",
     )
 
     reply = await _agent(model).reply("s1", "How much is a visit?")
 
-    assert reply.text == "It's 500 rupees."
+    assert reply.text == "Dr. Rao is free at 9 AM."
     assert reply.provider == "groq · test"
-    assert reply.tools_called == ["clinic_info"]
+    assert reply.tools_called == ["check_availability"]
     assert reply.latency_ms > 0
 
 
 async def test_stream_reply_yields_only_spoken_text() -> None:
     model = ScriptedChatModel(
-        script=[call_tool("clinic_info", {"topic": "hours"}), say("We open at 9 AM.")]
+        script=[call_tool("check_availability", {"date": "2026-11-24"}), say("We open at 9 AM.")]
     )
     agent = _agent(model)
 
@@ -59,7 +62,7 @@ async def test_stream_reply_speaks_apology_when_llms_fail() -> None:
 
 async def test_tool_call_loop_is_stopped_by_recursion_limit() -> None:
     looping = ScriptedChatModel(
-        script=[call_tool("clinic_info", {"topic": "hours"}, f"c{i}") for i in range(20)]
+        script=[call_tool("check_availability", {"date": "2026-11-24"}, f"c{i}") for i in range(20)]
     )
 
     reply = await _agent(looping, recursion_limit=6).reply("s1", "hours?")

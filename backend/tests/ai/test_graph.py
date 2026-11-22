@@ -56,6 +56,7 @@ async def test_system_prompt_contains_current_date() -> None:
     system = model.seen[0][0]
     assert isinstance(system, SystemMessage)
     assert "Monday 2026-11-23" in system.content and "2026-11-24 (tomorrow)" in system.content
+    assert "500 rupees" in system.content  # clinic facts are inlined
 
 
 async def test_unexpected_tool_exception_is_fed_back_to_model() -> None:

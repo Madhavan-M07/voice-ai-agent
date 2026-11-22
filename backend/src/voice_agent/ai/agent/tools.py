@@ -1,4 +1,4 @@
-"""Receptionist tools exposed to the LLM.
+"""Receptionist tools exposed to the LLM (clinic facts live in the system prompt, not a tool).
 
 Domain problems (bad date, slot taken, wrong phone) are returned as plain-text results starting with
 "Error:" so the model can explain and recover. Unexpected exceptions are caught by ToolNode.
@@ -30,6 +30,13 @@ MAX_SLOTS_LISTED = 8  # keep spoken answers short
 def normalize_phone(raw: str) -> str | None:
     digits = re.sub(r"\D", "", raw)
     return digits[-10:] if len(digits) >= 10 else None
+
+
+def normalize_booking_id(raw: str) -> str:
+    """'sfc 2324', 'S F C 2324' or SFC + a unicode dash + 2324 (from the LLM/STT) -> 'SFC-2324'."""
+    letters = re.sub(r"[^A-Za-z]", "", raw).upper()
+    digits = re.sub(r"\D", "", raw)
+    return f"{letters}-{digits}"
 
 
 def _spoken_day(day: date) -> str:
@@ -128,7 +135,7 @@ def build_tools(
             booking_id: Booking ID like SFC-1234.
             phone: Phone number used when booking.
         """
-        appt = repo.get(booking_id.strip())
+        appt = repo.get(normalize_booking_id(booking_id))
         if appt is None:
             return f"Error: no booking found with ID {booking_id}."
         if normalize_phone(phone) != appt.phone:
@@ -141,13 +148,4 @@ def build_tools(
             f"at {spoken_time(appt.slot)}."
         )
 
-    @tool(parse_docstring=True)
-    def clinic_info(topic: str) -> str:
-        """Answer questions about the clinic.
-
-        Args:
-            topic: One of hours, address, contact, services, doctors, fees, insurance.
-        """
-        return clinic.info(topic)
-
-    return [check_availability, book_appointment, cancel_appointment, clinic_info]
+    return [check_availability, book_appointment, cancel_appointment]

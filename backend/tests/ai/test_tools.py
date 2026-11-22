@@ -34,7 +34,6 @@ def test_tools_have_descriptions_and_arg_docs(tools: dict[str, BaseTool]) -> Non
         "check_availability",
         "book_appointment",
         "cancel_appointment",
-        "clinic_info",
     }
     schema = tools["book_appointment"].args
     assert "HH:MM" in schema["time"]["description"]
@@ -115,13 +114,21 @@ def test_cancel_requires_matching_phone(tools: dict[str, BaseTool]) -> None:
     assert "already cancelled" in again
 
 
+NON_BREAKING_HYPHEN, EN_DASH = chr(0x2011), chr(0x2013)  # dashes LLMs and STT emit
+
+
+@pytest.mark.parametrize(
+    "spoken_id", ["sfc 1001", "S F C 1001", f"SFC{NON_BREAKING_HYPHEN}1001", f"SFC{EN_DASH}1001"]
+)
+def test_cancel_accepts_booking_id_variants(tools: dict[str, BaseTool], spoken_id: str) -> None:
+    _book(tools)
+    result = tools["cancel_appointment"].invoke({"booking_id": spoken_id, "phone": "9876543210"})
+    assert result.startswith("Cancelled booking SFC-1001")
+
+
 def test_cancel_unknown_booking(tools: dict[str, BaseTool]) -> None:
     result = tools["cancel_appointment"].invoke({"booking_id": "SFC-9999", "phone": "9876543210"})
     assert "no booking found" in result
-
-
-def test_clinic_info(tools: dict[str, BaseTool]) -> None:
-    assert "500 rupees" in tools["clinic_info"].invoke({"topic": "fees"})
 
 
 @pytest.mark.parametrize(
