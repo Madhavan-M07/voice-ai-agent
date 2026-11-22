@@ -1,6 +1,6 @@
 # Spec: Phase 2 — Text-only clinic receptionist agent
 
-- **Status:** Draft
+- **Status:** Done. See [Results & deviations](#results--deviations) at the end.
 - **Date:** 2026-11-22
 - **Related:** ADR-0002 (to write: LLM providers & agent framework), README roadmap Phase 2
 
@@ -34,7 +34,7 @@ You: 9:30. My name is Arjun, phone 98765 43210.
 Agent: To confirm: Arjun, tomorrow at 9:30 with Dr. Rao. Shall I book it?
 You: Yes.
 Agent: Done. Your booking ID is SFC-4821. Anything else?
-[groq · llama-3.1-8b-instant · 640 ms]
+[illustrative: real transcripts are in Results below]
 ```
 Rules the agent follows (system prompt):
 - **Voice-ready output:** short sentences, no markdown, lists or emojis; times spoken naturally.
@@ -75,7 +75,7 @@ groq.bind_tools(tools).with_retry(stop_after_attempt=2)
 | `check_availability` | `date`, `doctor?` | free 30-min slots per doctor; error for past dates, weekends, >30 days ahead |
 | `book_appointment` | `patient_name`, `phone`, `date`, `time`, `doctor` | booking ID; rejects taken or invalid slots |
 | `cancel_appointment` | `booking_id`, `phone` | confirmation; the phone must match the booking |
-| `clinic_info` | `topic` (hours / address / services / doctors / fees / insurance) | facts from static clinic data |
+| ~~`clinic_info`~~ | — | **Removed after live testing:** facts moved into the system prompt (see Results) |
 
 **Domain & storage**
 - `ai/agent/clinic.py`: static clinic profile (name, hours Mon–Fri 9:00–17:00, 2 doctors, services, fees) and
@@ -156,3 +156,33 @@ Each step is test-first, passes lint, formatting, type checking and tests, and g
 1. Clinic timezone: default `Asia/Kolkata`. Is that right for your demo?
 2. Clinic name and doctors: fictional "Sunrise Family Clinic" with Dr. Meera Rao and Dr. James Lee. OK, or your own?
 3. Should booking require a phone number? (Recommended: yes, because it's how cancellation is verified.)
+
+## Results & deviations
+Live evaluation on 2026-11-22: the 6 scripted conversations (11 turns), run on the Ryzen 5 5600H, 8 GB RAM, no GPU.
+
+| Mode | Scenarios correct | p50 latency | max latency | Notes |
+|------|-------------------|-------------|-------------|-------|
+| Groq chain (20b → 120b) | **6 / 6** | **814 ms** | 1,956 ms | Rate-limit bursts absorbed by gpt-oss-120b; Ollama never needed |
+| Ollama `qwen2.5:3b` only | 4 / 6 | 17,127 ms | 99,571 ms | Booked without calling `check_availability` first; scenario 5 never booked |
+
+**Deviations from the design above, all driven by live testing:**
+1. **The Groq model changed:** `llama-3.1-8b-instant` was retired (404). Now `openai/gpt-oss-20b` with
+   `reasoning_effort=low` and `reasoning_format=hidden`.
+2. **A second Groq model was added:** the free tier allows 8,000 tokens/min per model and each turn costs
+   about 1,000 tokens. A 429 now switches to `gpt-oss-120b` (about 1 s) instead of retrying, and only
+   network, timeout and 5xx errors are retried.
+3. **The `clinic_info` tool was removed:** the model invented a fee ("£40") with facts behind a tool. Facts
+   are now inlined in a shorter system prompt.
+4. **Booking-ID normalization:** the LLM wrote `SFC‑2324` with a non-breaking hyphen; spoken and STT
+   variants now resolve.
+5. **Every fallback is logged** with its reason; the first run gave no clue why Ollama was used.
+6. **Ollama timeout raised to 90 s.** The measurements show it is an offline last resort, not a real-time
+   fallback (see ADR-0002).
+
+**Known gaps (carried forward):**
+- The confirm-before-booking rule is prompt-enforced only. Groq followed it in the final run; qwen2.5:3b
+  partly ignored it. Consider a code-level confirmation step before Phase 3, where speech-recognition errors
+  make confirmation matter more.
+- Groq's TPM limit caps throughput to about one call at a time on the free tier.
+- Clinic details are a Python constant (`clinic.py`). They should move to a config file so a different
+  clinic doesn't need code changes.

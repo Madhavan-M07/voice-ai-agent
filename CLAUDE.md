@@ -7,16 +7,17 @@ Update it whenever Claude makes the same mistake twice. Fill in every `TODO`.
 - **What:** Real-time voice AI agent — user speaks in a browser (desktop/mobile), audio streams over WebRTC
   through VAD → STT → LangGraph agent → TTS, and the reply streams back. Portfolio project.
 - **Stack:** Python 3.12 · uv · FastAPI · aiortc (WebRTC) · Silero VAD · faster-whisper · LangGraph/LangChain ·
-  Groq free tier (primary LLM) + Ollama `qwen2.5:3b` (fallback) · Piper/Kokoro TTS · SQLite.
+  LLM chain Groq `gpt-oss-20b` → Groq `gpt-oss-120b` → Ollama `qwen2.5:3b` (ADR-0002) · Piper/Kokoro TTS · SQLite.
 - **Constraint: $0 budget, 8 GB RAM laptop, no GPU (Ryzen 5 5600H).** Never suggest paid services or models
   >3B params locally. Keep total runtime RAM under ~3.5 GB.
-- **Status:** Phase 1 done (skeleton). Roadmap in `README.md`.
+- **Status:** Phase 2 done (text receptionist agent). Roadmap in `README.md`.
 
 ## Commands
 Use these exact commands. Do not invent alternatives. **Run all backend commands from `backend/`.**
 ```bash
 install:    uv sync
 dev:        uv run uvicorn voice_agent.main:app --reload     # http://127.0.0.1:8000/health
+chat:       uv run voice-agent-chat [--local]              # talk to the agent; --local = Ollama only
 test:       uv run pytest
 test-one:   uv run pytest tests/test_x.py::test_y
 lint:       uv run ruff check .
@@ -73,6 +74,13 @@ frontend/       plain HTML/CSS/JS WebRTC client (desktop + mobile), served by Fa
 - Repo lives in OneDrive: uv needs `link-mode = "copy"` (set in `backend/pyproject.toml`) or installs fail with os error 396.
 - Python 3.12 is pinned on purpose — ML wheels (faster-whisper, onnxruntime) may lack 3.14 builds on Windows.
 - Starlette prints an httpx deprecation warning in tests; harmless, don't "fix" by adding unvetted packages.
+- OneDrive sometimes locks `.venv` files ("Access is denied", os error 5) during `uv sync`/`uv add`; just rerun.
+- Groq free tier: 8,000 tokens/min **per model**, ~1,000 tokens per turn. Keep the system prompt + tool schemas
+  lean. Groq retires models without notice; model IDs live in `core/config.py`, never hard-code them elsewhere.
+- Ollama on this CPU takes 30–50 s per turn: last-resort fallback only, never assume it's real-time.
+- LLMs emit unicode dashes (e.g. `SFC‑1234` with U+2011); normalize IDs from model/STT text before lookups.
+- Clinic facts are in the system prompt on purpose (ADR-0002); don't move them back behind a tool.
+- Live check against real models: run the scripted scenarios in the Phase 2 spec; tests never call real LLMs.
 
 ## Pointers
 - Architecture: `docs/architecture.md` · Decisions: `docs/adr/` · Feature specs: `docs/specs/`
