@@ -34,9 +34,9 @@ Requirements: [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com/) (o
 ```bash
 cd backend
 uv sync                                         # install deps (Python 3.12)
-cp .env.example .env                            # then add your GROQ_API_KEY
+# create backend/.env containing:  GROQ_API_KEY=<free key from console.groq.com>  (optional)
 uv run uvicorn voice_agent.main:app --reload    # http://127.0.0.1:8000/health
-uv run voice-agent-chat                         # chat with the receptionist (add --local for Ollama only)
+uv run voice-agent-chat                         # chat with the receptionist (--local = Ollama only)
 uv run pytest                                   # tests (offline: no API key or Ollama needed)
 ```
 
@@ -71,20 +71,34 @@ sent to Groq's API.
 ## Project structure
 
 ```
-backend/                 Python · FastAPI
+backend/
+  config/clinic.yaml     clinic profile: all business data (hours, doctors, fees, timezone...)
   src/voice_agent/
-    api/                 HTTP routes (health, WebRTC signaling, sessions)
-    core/                settings, logging
-    rtc/                 WebRTC peer connections & call sessions
-    pipeline/            streaming orchestrator, sentence chunker, barge-in
-    ai/agent/            LangGraph dialogue agent (memory, tools, retries, fallback)
-    ai/llm/              Groq + Ollama providers
-    ai/speech/           VAD, speech-to-text, text-to-speech
-    storage/             SQLite transcripts & metrics
-  tests/
-frontend/                browser / mobile WebRTC client
+    core/                settings (env vars) and logging setup
+    clinic/              clinic domain: validated profile, booking rules, spoken dates/times
+    storage/             appointment repository (SQLite)
+    ai/llm/              LLM provider chain: Groq models -> local Ollama, with fallback logging
+    ai/agent/            LangGraph receptionist: tools, prompt, graph, ReceptionistAgent service
+    api/                 FastAPI routes
+    cli.py               terminal chat
+    ai/speech/ pipeline/ rtc/    planned (Phases 3-4)
+  evals/                 live regression check against real models (scenarios.yaml)
+  tests/                 unit tests mirroring src/ (offline, no LLM calls)
+frontend/                planned (Phase 4): browser / mobile client
 docs/                    architecture, ADRs, feature specs
 ```
+
+See [docs/architecture.md](docs/architecture.md) for responsibilities and the dependency rule.
+
+## Debugging
+
+| Symptom | Do this |
+|---------|---------|
+| Wrong or odd answer | `uv run voice-agent-chat -vv`: logs the provider, latency and tools for every turn, plus each tool call's arguments and result |
+| Slow replies (20 s+) | Look for `WARNING LLM ... failed, trying next model`: Groq was rate-limited or unreachable and the local model answered |
+| "Clinic config ... invalid" at startup | The message names the bad field in `config/clinic.yaml` |
+| Changed a prompt, tool or model | `uv run python evals/run_live_eval.py`: 11 scripted turns against the real models, pass/fail per turn |
+| Check what was booked | `uv run python -c "import sqlite3; print(sqlite3.connect('data/clinic.db').execute('select * from appointments').fetchall())"` |
 
 ## Roadmap
 - [x] Phase 1 — Project skeleton, config, health check, tests

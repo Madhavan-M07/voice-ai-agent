@@ -1,42 +1,80 @@
 # Architecture
 
-> Living document. Keep it accurate; Claude reads it before structural changes.
-> Record *why* decisions were made in `docs/adr/`, not here.
+> Living document. Keep it accurate; read it before structural changes.
+> *Why* decisions were made lives in `docs/adr/`.
 
 ## 1. Context
-TODO — What the system does, who uses it, and the external systems it talks to.
+A voice receptionist for a clinic. A caller talks (desktop or phone browser); the agent checks
+availability, books and cancels appointments, and answers questions about the clinic. Built on a $0 stack
+that runs on an 8 GB RAM, CPU-only laptop.
 
 ```
-[User/Client] ──► [This system] ──► [External service A]
-                        │
-                        └──► [Database]
+[Caller: browser / phone] ──(Phase 4: WebRTC audio)──► [FastAPI backend] ──► Groq API (LLM, free tier)
+                                                             │          └──► Ollama (local LLM, last resort)
+                                                             └──► SQLite (appointments)
+          today: terminal chat (cli.py) ─────────────────────┘
 ```
 
-## 2. Components
-| Component | Path | Responsibility | Depends on |
-|-----------|------|----------------|------------|
-| API | `backend/src/voice_agent/api/` | HTTP routes, WebRTC signaling | rtc, core |
-| Core | `backend/src/voice_agent/core/` | Settings, logging | — |
-| RTC | `backend/src/voice_agent/rtc/` | Peer connections, audio tracks, call sessions | pipeline |
-| Pipeline | `backend/src/voice_agent/pipeline/` | Streaming VAD → STT → agent → TTS, barge-in | ai |
-| Agent | `backend/src/voice_agent/ai/agent/` | LangGraph dialogue: memory, tools, retries, fallback | ai/llm, storage |
-| LLM | `backend/src/voice_agent/ai/llm/` | Groq (primary) / Ollama (fallback) providers | core |
-| Speech | `backend/src/voice_agent/ai/speech/` | VAD, STT, TTS models | core |
-| Storage | `backend/src/voice_agent/storage/` | SQLite transcripts & metrics | core |
-| Frontend | `frontend/` | Browser/mobile WebRTC client | API (HTTP + WebRTC) |
+## 2. Components (`backend/src/voice_agent/`)
+| Package | Responsibility | May import |
+|---------|----------------|------------|
+| `core/` | Settings (`config.py`, the only place env vars are read) and logging setup | — |
+| `clinic/` | The clinic domain: validated profile loaded from `config/clinic.yaml`, booking rules, spoken date/time helpers. No AI, HTTP or audio. | `core` |
+| `storage/` | Appointment repository (SQLite; in-memory for tests) | — |
+| `ai/llm/` | LLM provider chain: Groq models → Ollama, retry/fallback, logging | `core` |
+| `ai/agent/` | LangGraph receptionist: tools, prompt, graph, `ReceptionistAgent` service | `clinic`, `storage`, `ai/llm`, `core` |
+| `api/` | FastAPI routes (today: `/health`) | `ai`, `core` |
+| `cli.py` | Terminal chat for manual testing | `ai/agent`, `clinic`, `core` |
+| `ai/speech/` | *Planned (Phase 3):* VAD, speech-to-text, text-to-speech | `core` |
+| `pipeline/` | *Planned (Phase 3/5):* streaming audio ⇄ agent orchestration, barge-in | `ai`, `core` |
+| `rtc/` | *Planned (Phase 4):* WebRTC connections and call sessions | `pipeline`, `core` |
 
-## 3. Key flows
-TODO — Describe the 1–3 most important request/data flows step by step.
+**Dependency rule:** arrows only point down the table. `clinic/` and `storage/` never import `ai/`;
+`ai/` never imports `api/`, `rtc/` or `pipeline/`.
+
+Other top-level folders:
+- `backend/config/clinic.yaml`: the clinic profile. **All business data lives here, not in code.**
+- `backend/evals/`: live regression check against the real models (`scenarios.yaml` + runner).
+- `backend/tests/`: unit tests, mirroring `src/`. They never call an LLM or the network.
+- `frontend/`: *Planned (Phase 4):* browser/mobile client.
+
+## 3. Key flow: one caller turn
+```
+caller text ─► ReceptionistAgent.stream_reply(session_id, text)
+                 │
+                 ▼  LangGraph thread = session_id (memory via checkpointer)
+              [agent node] system prompt (clinic facts + today's date) + trimmed history
+                 │   LLM chain: groq gpt-oss-20b ─429/404─► gpt-oss-120b ─fail─► ollama qwen2.5:3b
+                 │   every LLM fails → apology reply (never crashes)
+                 ├─ tool calls? ─► [tools node] check_availability / book_appointment / cancel_appointment
+                 │                   └─ domain errors return "Error: ..." text so the model can recover
+                 ▼
+              reply text streamed in chunks ─► caller (later: sentence-by-sentence to TTS)
+                 │
+                 ▼
+              TurnResult logged: session, provider, latency, tool calls (+ args/results at DEBUG)
+```
 
 ## 4. Data model
-TODO — Core entities and relationships; where state lives.
+- **ClinicProfile** (YAML → pydantic): name, assistant name, timezone, hours + open days, slot length,
+  booking window, doctors (optional per-doctor working days), services, fees, insurance, phone length,
+  booking-ID prefix, emergency number.
+- **Appointment** (SQLite table `appointments`): booking_id, patient_name, phone, doctor_id, day, slot,
+  status (`booked`/`cancelled`). A partial unique index permits one *active* booking per doctor/slot.
+- **Conversation state**: LangGraph in-memory checkpointer, one thread per session (lost on restart;
+  persistence is planned for Phase 6).
 
 ## 5. Cross-cutting concerns
-- **Config & secrets:** environment variables; see `.env.example`.
-- **Errors & logging:** TODO
-- **Auth:** TODO
-- **Observability:** TODO
-- **Performance/latency budgets:** TODO
+- **Config:** `core/config.py` (`Settings`, from env / `backend/.env`) for technical settings;
+  `config/clinic.yaml` for business data. Both are validated at startup and fail fast with clear errors.
+- **Logging:** see `core/logging_setup.py`. WARNING = degraded but handled (fallback, recursion limit);
+  INFO = one line per turn; DEBUG = every tool call with arguments (contains caller details: dev only).
+- **Errors:** caller-facing problems never raise out of the agent. Bad requests become tool `Error:`
+  results, LLM outages become an apology. Config errors stop the app at startup.
+- **Latency:** about 0.4–2 s per turn on Groq (measured in Phase 2; see the spec). Ollama on CPU takes
+  30–50 s and is offline backup only.
+- **Privacy:** caller names and phones go to Groq. The demo uses fictional data only (see ADR-0002).
 
 ## 6. Constraints & non-goals
-TODO
+- $0 budget; 8 GB RAM; no GPU. No local model larger than 3B parameters.
+- Not a medical system: no advice, no real patient data, no auth (demo).

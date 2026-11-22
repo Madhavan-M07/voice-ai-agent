@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Project memory for Claude Code. Loaded into every session — keep it short, specific, and true.
-Update it whenever Claude makes the same mistake twice. Fill in every `TODO`.
+Update it whenever Claude makes the same mistake twice.
 
 ## Project
 - **What:** Real-time voice AI agent — user speaks in a browser (desktop/mobile), audio streams over WebRTC
@@ -17,9 +17,10 @@ Use these exact commands. Do not invent alternatives. **Run all backend commands
 ```bash
 install:    uv sync
 dev:        uv run uvicorn voice_agent.main:app --reload     # http://127.0.0.1:8000/health
-chat:       uv run voice-agent-chat [--local]              # talk to the agent; --local = Ollama only
+chat:       uv run voice-agent-chat [--local] [-v|-vv]     # talk to the agent; -v turn logs, -vv tool calls
+live-eval:  uv run python evals/run_live_eval.py [--local]  # real-model regression check (costs Groq tokens)
 test:       uv run pytest
-test-one:   uv run pytest tests/test_x.py::test_y
+test-one:   uv run pytest tests/ai/test_tools.py::test_cancel_requires_matching_phone
 lint:       uv run ruff check .
 format:     uv run ruff format .
 typecheck:  uv run mypy
@@ -29,20 +30,21 @@ typecheck:  uv run mypy
 Full detail lives in `docs/architecture.md` — read it before any structural change.
 ```
 backend/src/voice_agent/
-  api/          FastAPI routes (health, signaling, sessions, stats). Thin; no business logic.
-  core/         config.py (pydantic-settings; the ONLY place env vars are read), logging.py
-  rtc/          aiortc peer connections, audio tracks, call session manager
-  pipeline/     streaming orchestrator: VAD → STT → agent → TTS, sentence chunker, barge-in
-  ai/agent/     LangGraph graph, state, tools, prompts, retries/fallback. No audio or HTTP code.
-  ai/llm/       LLM providers (Groq primary, Ollama fallback) behind one Protocol
-  ai/speech/    Silero VAD, faster-whisper STT, Piper/Kokoro TTS — each behind a Protocol
-  storage/      SQLite transcripts + latency/inference metadata
-backend/config/clinic.yaml   the clinic profile (name, hours, doctors + days, fees, timezone...)
-backend/tests/  mirrors src layout
-frontend/       plain HTML/CSS/JS WebRTC client (desktop + mobile), served by FastAPI
+  core/         config.py (Settings; the ONLY place env vars are read), logging_setup.py
+  clinic/       clinic domain: profile.py (YAML → validated model), scheduling.py (booking rules),
+                time_utils.py (spoken dates/times). No AI, HTTP or audio.
+  storage/      appointments.py: SQLite repository (+ in-memory for tests)
+  ai/llm/       providers.py: Groq chain → Ollama, retry/fallback, every switch logged
+  ai/agent/     tools.py, prompts.py, state.py, graph.py (LangGraph), service.py (ReceptionistAgent)
+  api/          FastAPI routes (today: /health). Thin; no business logic.
+  cli.py        terminal chat
+  ai/speech/ pipeline/ rtc/   planned for Phases 3-4 (empty)
+backend/config/clinic.yaml   all clinic business data
+backend/evals/  live regression check: scenarios.yaml + run_live_eval.py
+backend/tests/  mirrors src/ (tests/clinic, tests/ai, tests/storage, tests/api); fakes.py = test doubles
+frontend/       planned (Phase 4)
 ```
-- Dependency rule: `api`/`rtc` → `pipeline` → `ai` → `storage`/`core`. Never the reverse. `ai/` never imports
-  `api`, `rtc` or `pipeline`.
+- Dependency rule: `api`/`rtc` → `pipeline` → `ai` → `clinic`/`storage` → `core`. Never the reverse.
 - Providers swap via config, never via `if provider == ...` scattered through code.
 - **No business data in code.** Anything about a specific clinic (names, hours, doctors, fees, phone
   format, booking-ID prefix, emergency number, timezone) belongs in `config/clinic.yaml`, validated by
@@ -66,7 +68,7 @@ frontend/       plain HTML/CSS/JS WebRTC client (desktop + mobile), served by Fa
 - Use `logging.getLogger(__name__)`, never `print`. Log latency per pipeline stage in ms.
 - Tests must not need network, a microphone, or downloaded models — mock adapters at the boundary.
 - Fail loudly at boundaries: validate external input; don't swallow exceptions.
-- No secrets in code, logs, or tests. Config comes from environment variables (see `.env.example`).
+- No secrets in code, logs, or tests. Config comes from environment variables / `backend/.env`.
 - Comments explain *why*, not *what*.
 
 ## Git
@@ -86,7 +88,15 @@ frontend/       plain HTML/CSS/JS WebRTC client (desktop + mobile), served by Fa
 - Ollama on this CPU takes 30–50 s per turn: last-resort fallback only, never assume it's real-time.
 - LLMs emit unicode dashes (e.g. `SFC‑1234` with U+2011); normalize IDs from model/STT text before lookups.
 - Clinic facts are in the system prompt on purpose (ADR-0002); don't move them back behind a tool.
-- Live check against real models: run the scripted scenarios in the Phase 2 spec; tests never call real LLMs.
+- Tests never call real LLMs. After changing prompts, tools or models, run `evals/run_live_eval.py`.
+
+## Debugging
+- Wrong answer in chat? Rerun with `uv run voice-agent-chat -vv`: every turn logs provider + latency +
+  tools, and every tool call logs its args and result. Most bugs are visible there.
+- `ReceptionistAgent.reply()` returns a `TurnResult` (text, provider, latency_ms, tool_calls with
+  args/results); `last_turn(session_id)` gives the same after streaming. Use these in tests and evals.
+- WARNING `LLM ... failed, trying next model` = fallback happened; the reason (429, 404...) is in the line.
+- Inspect bookings: `uv run python -c "import sqlite3; print(sqlite3.connect('data/clinic.db').execute('select * from appointments').fetchall())"`
 
 ## Pointers
 - Architecture: `docs/architecture.md` · Decisions: `docs/adr/` · Feature specs: `docs/specs/`
