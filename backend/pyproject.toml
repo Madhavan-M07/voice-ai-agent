@@ -59,4 +59,4 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
 python_version = "3.12"
 strict = true
 mypy_path = "src:tests"
-packages = ["voice_agent"]
+files = ["src/voice_agent", "evals"]
