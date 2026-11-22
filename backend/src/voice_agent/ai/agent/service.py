@@ -53,8 +53,8 @@ class ReceptionistAgent:
             return datetime.now(tz).replace(tzinfo=None)
 
         tools = build_tools(SqliteAppointmentRepository(settings.clinic_db_path), clock)
-        primary, fallback = create_chat_models(settings)
-        return cls(build_graph(compose_chat_model(primary, fallback, tools), tools, clock))
+        remote, local = create_chat_models(settings)
+        return cls(build_graph(compose_chat_model(remote, local, tools), tools, clock))
 
     def _config(self, session_id: str) -> RunnableConfig:
         return {"configurable": {"thread_id": session_id}, "recursion_limit": self._recursion_limit}

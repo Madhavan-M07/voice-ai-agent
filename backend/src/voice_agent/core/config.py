@@ -18,10 +18,15 @@ class Settings(BaseSettings):
 
     # LLM: Groq (free tier, primary) with local Ollama as fallback.
     groq_api_key: SecretStr | None = None
-    groq_model: str = "llama-3.1-8b-instant"
+    # Groq retires models over time; current list: console.groq.com/docs/models
+    groq_model: str = "openai/gpt-oss-20b"
+    # Tried in order when the primary fails. Groq rate limits are per model, so these absorb 429s.
+    groq_fallback_models: list[str] = ["openai/gpt-oss-120b"]
+    groq_reasoning_effort: Literal["low", "medium", "high"] = "low"  # low = fastest replies
+    groq_timeout_s: float = 10.0
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
-    llm_timeout_s: float = 15.0
+    ollama_timeout_s: float = 90.0  # CPU-only 3B model; first call also loads it into RAM
     llm_temperature: float = 0.2
 
     # Clinic receptionist agent.
