@@ -1,0 +1,40 @@
+# Clinic profile for the voice receptionist. Edit this file (or point CLINIC_CONFIG_PATH at your own copy)
+# to run the agent for a different clinic. No code changes are needed. Validated at startup.
+#
+# Days use: mon tue wed thu fri sat sun.  Times use 24-hour HH:MM.
+
+name: Sunrise Family Clinic
+assistant_name: Asha                 # what the voice agent calls itself
+address: 12 Lake View Road, near City Park
+phone: 040 1234 5678
+timezone: Asia/Kolkata               # IANA name; used for "today" and "tomorrow"
+emergency_number: "112"
+booking_id_prefix: SFC               # booking IDs look like SFC-1234
+phone_digits: 10                     # digits in a local phone number
+
+hours:
+  open: "09:00"
+  close: "17:00"
+  days: [mon, tue, wed, thu, fri]
+
+slot_minutes: 30
+booking_window_days: 30              # how far ahead callers can book
+
+doctors:
+  - id: dr-rao
+    name: Dr. Meera Rao
+    specialty: General Physician
+    # no "days": works every day the clinic is open
+  - id: dr-lee
+    name: Dr. James Lee
+    specialty: Pediatrician
+    days: [mon, wed, fri]
+
+services:
+  - general consultations
+  - child health checkups
+  - vaccinations
+  - basic lab tests
+
+fees: A consultation costs 500 rupees. Follow-up visits within 7 days are free.
+insurance: We accept most major health insurance cards. Please bring your card to the visit.
