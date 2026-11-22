@@ -1,6 +1,7 @@
 """Application settings, loaded from environment variables and an optional .env file."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import SecretStr
@@ -20,6 +21,12 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.1-8b-instant"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
+    llm_timeout_s: float = 15.0
+    llm_temperature: float = 0.2
+
+    # Clinic receptionist agent.
+    clinic_timezone: str = "Asia/Kolkata"
+    clinic_db_path: Path = Path("data/clinic.db")
 
 
 @lru_cache
