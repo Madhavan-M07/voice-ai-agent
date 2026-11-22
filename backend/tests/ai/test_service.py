@@ -6,10 +6,10 @@ import yaml
 from pydantic import SecretStr
 
 from fakes import ScriptedChatModel, call_tool, make_clinic, say
-from voice_agent.ai.agent.clinic import ClinicConfigError
 from voice_agent.ai.agent.graph import NO_PROVIDER, build_graph
 from voice_agent.ai.agent.service import ReceptionistAgent
 from voice_agent.ai.agent.tools import build_tools
+from voice_agent.clinic import ClinicConfigError
 from voice_agent.core.config import Settings
 from voice_agent.storage.appointments import InMemoryAppointmentRepository
 
@@ -51,7 +51,8 @@ async def test_stream_reply_yields_only_spoken_text() -> None:
     chunks = [c async for c in agent.stream_reply("s1", "When do you open?")]
 
     assert "".join(chunks) == "We open at 9 AM."
-    assert await agent.last_provider("s1") == "fake · test"
+    turn = agent.last_turn("s1")
+    assert turn is not None and turn.provider == "fake · test"
 
 
 async def test_stream_reply_speaks_apology_when_llms_fail() -> None:
@@ -60,7 +61,8 @@ async def test_stream_reply_speaks_apology_when_llms_fail() -> None:
     text = "".join([c async for c in agent.stream_reply("s1", "hello")])
 
     assert "having some trouble" in text
-    assert await agent.last_provider("s1") == NO_PROVIDER
+    turn = agent.last_turn("s1")
+    assert turn is not None and turn.provider == NO_PROVIDER
 
 
 async def test_tool_call_loop_is_stopped_by_recursion_limit() -> None:
@@ -97,3 +99,29 @@ def test_from_settings_fails_fast_on_missing_clinic_config(tmp_path: Path) -> No
     settings = Settings(_env_file=None, clinic_config_path=tmp_path / "missing.yaml")  # type: ignore[call-arg]
     with pytest.raises(ClinicConfigError):
         ReceptionistAgent.from_settings(settings)
+
+
+async def test_turn_records_each_tool_call_with_args_and_result() -> None:
+    model = ScriptedChatModel(
+        script=[call_tool("check_availability", {"date": "2026-11-24"}), say("9 AM is free.")]
+    )
+
+    turn = await _agent(model).reply("s1", "Anything tomorrow?")
+
+    [call] = turn.tool_calls
+    assert call.name == "check_availability"
+    assert call.args == {"date": "2026-11-24"}
+    assert call.result.startswith("Free times on Tuesday")
+
+
+async def test_every_turn_is_logged_for_debugging(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("DEBUG", logger="voice_agent")
+    model = ScriptedChatModel(
+        script=[call_tool("check_availability", {"date": "2026-11-24"}), say("9 AM is free.")]
+    )
+
+    await _agent(model).reply("abc123", "Anything tomorrow?")
+
+    assert "turn session=abc123 provider=fake · test" in caplog.text
+    assert "tools=['check_availability']" in caplog.text
+    assert "tool check_availability args={'date': '2026-11-24'} -> Free times" in caplog.text

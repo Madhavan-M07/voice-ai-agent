@@ -10,7 +10,7 @@ it is sent on every turn and counts against Groq's free-tier tokens-per-minute l
 
 from datetime import datetime, timedelta
 
-from voice_agent.ai.agent.clinic import ClinicProfile, spoken_time
+from voice_agent.clinic import ClinicProfile, spoken_time
 
 _TEMPLATE = """\
 You are {assistant}, the phone receptionist at {clinic}, speaking on a voice call.
