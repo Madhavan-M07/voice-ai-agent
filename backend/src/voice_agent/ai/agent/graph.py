@@ -16,15 +16,19 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from voice_agent.ai.agent.clinic import ClinicProfile
 from voice_agent.ai.agent.prompts import build_system_prompt
 from voice_agent.ai.agent.state import ReceptionistState
 from voice_agent.ai.agent.tools import Clock
 from voice_agent.ai.llm.providers import ChatRunnable, provider_of
+from voice_agent.clinic import ClinicProfile
 
 logger = logging.getLogger(__name__)
 
 NO_PROVIDER = "none"
+
+ReceptionistGraph = CompiledStateGraph[
+    ReceptionistState, None, ReceptionistState, ReceptionistState
+]
 
 
 def apology(clinic: ClinicProfile) -> str:
@@ -42,7 +46,7 @@ def build_graph(
     *,
     max_history_messages: int = 30,
     checkpointer: BaseCheckpointSaver[str] | None = None,
-) -> CompiledStateGraph[ReceptionistState, None, ReceptionistState, ReceptionistState]:
+) -> ReceptionistGraph:
     async def agent(state: ReceptionistState) -> dict[str, object]:
         history = trim_messages(
             state["messages"],
@@ -55,7 +59,7 @@ def build_graph(
         try:
             reply = await llm.ainvoke(prompt)
         except Exception:
-            logger.exception("All LLM providers failed")
+            logger.exception("All LLM providers failed; replying with an apology")
             return {"messages": [AIMessage(apology(clinic))], "provider": NO_PROVIDER}
         return {"messages": [reply], "provider": provider_of(reply)}
 

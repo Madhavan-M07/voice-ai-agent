@@ -12,13 +12,14 @@ from datetime import date, datetime
 
 from langchain_core.tools import BaseTool, tool
 
-from voice_agent.ai.agent.clinic import (
+from voice_agent.clinic import (
     ClinicProfile,
     Doctor,
     SlotError,
     describe_days,
     parse_date,
     parse_time,
+    spoken_day,
     spoken_time,
     validate_date,
     validate_slot,
@@ -39,10 +40,6 @@ def normalize_booking_id(raw: str) -> str:
     letters = re.sub(r"[^A-Za-z]", "", raw).upper()
     digits = re.sub(r"\D", "", raw)
     return f"{letters}-{digits}"
-
-
-def _spoken_day(day: date) -> str:
-    return day.strftime("%A %d %B %Y").replace(" 0", " ")
 
 
 def build_tools(
@@ -87,10 +84,10 @@ def build_tools(
             doctors = [found]
         else:
             doctors = list(clinic.doctors)
-        lines = [f"Free times on {_spoken_day(day)}:"]
+        lines = [f"Free times on {spoken_day(day)}:"]
         for d in doctors:
             if not clinic.works_on(d, day):
-                days = describe_days(d.days or clinic.hours.days)
+                days = describe_days(clinic.working_days(d))
                 lines.append(f"- {d.name} ({d.specialty}): not working that day; works {days}.")
                 continue
             slots = free_slots(d, day)
@@ -131,7 +128,7 @@ def build_tools(
             return f"Error: {spoken_time(slot)} was just taken. Free times: {alternatives}."
         return (
             f"Booked. Booking ID {appt.booking_id}: {name} with {found.name} "
-            f"on {_spoken_day(day)} at {spoken_time(slot)}."
+            f"on {spoken_day(day)} at {spoken_time(slot)}."
         )
 
     @tool(parse_docstring=True)
@@ -151,7 +148,7 @@ def build_tools(
             return f"Booking {appt.booking_id} was already cancelled."
         repo.cancel(appt.booking_id)
         return (
-            f"Cancelled booking {appt.booking_id} on {_spoken_day(appt.day)} "
+            f"Cancelled booking {appt.booking_id} on {spoken_day(appt.day)} "
             f"at {spoken_time(appt.slot)}."
         )
 
