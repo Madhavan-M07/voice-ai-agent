@@ -2,9 +2,11 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import SecretStr
 
-from fakes import ScriptedChatModel, call_tool, say
+from fakes import ScriptedChatModel, call_tool, make_clinic, say
+from voice_agent.ai.agent.clinic import ClinicConfigError
 from voice_agent.ai.agent.graph import NO_PROVIDER, build_graph
 from voice_agent.ai.agent.service import ReceptionistAgent
 from voice_agent.ai.agent.tools import build_tools
@@ -14,12 +16,13 @@ from voice_agent.storage.appointments import InMemoryAppointmentRepository
 pytestmark = pytest.mark.anyio
 
 NOW = datetime(2026, 11, 23, 10, 15)
+CLINIC = make_clinic()
 
 
 def _agent(model: ScriptedChatModel, recursion_limit: int = 12) -> ReceptionistAgent:
-    tools = build_tools(InMemoryAppointmentRepository(), clock=lambda: NOW)
-    graph = build_graph(model, tools, clock=lambda: NOW)
-    return ReceptionistAgent(graph, recursion_limit=recursion_limit)
+    tools = build_tools(InMemoryAppointmentRepository(), lambda: NOW, CLINIC)
+    graph = build_graph(model, tools, lambda: NOW, CLINIC)
+    return ReceptionistAgent(graph, clinic=CLINIC, recursion_limit=recursion_limit)
 
 
 async def test_reply_reports_text_provider_tools_and_latency() -> None:
@@ -72,11 +75,25 @@ async def test_tool_call_loop_is_stopped_by_recursion_limit() -> None:
     assert "having some trouble" in streamed
 
 
-def test_from_settings_wires_sqlite_and_providers(tmp_path: Path) -> None:
+def test_from_settings_loads_clinic_from_config_file(tmp_path: Path) -> None:
+    config = tmp_path / "clinic.yaml"
+    config.write_text(
+        yaml.safe_dump(make_clinic(name="Hilltop Clinic").model_dump(mode="json")), encoding="utf-8"
+    )
     settings = Settings(  # type: ignore[call-arg]
-        _env_file=None, groq_api_key=SecretStr("k"), clinic_db_path=tmp_path / "c.db"
+        _env_file=None,
+        groq_api_key=SecretStr("k"),
+        clinic_config_path=config,
+        clinic_db_path=tmp_path / "c.db",
     )
 
-    ReceptionistAgent.from_settings(settings)
+    agent = ReceptionistAgent.from_settings(settings)
 
+    assert agent.clinic.name == "Hilltop Clinic"
     assert (tmp_path / "c.db").exists()
+
+
+def test_from_settings_fails_fast_on_missing_clinic_config(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, clinic_config_path=tmp_path / "missing.yaml")  # type: ignore[call-arg]
+    with pytest.raises(ClinicConfigError):
+        ReceptionistAgent.from_settings(settings)

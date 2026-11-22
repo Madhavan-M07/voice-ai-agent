@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
 
-from fakes import ScriptedChatModel, call_tool, say
+from fakes import ScriptedChatModel, call_tool, make_clinic, say
 from voice_agent.ai.agent.graph import NO_PROVIDER, build_graph
 from voice_agent.ai.agent.tools import build_tools
 from voice_agent.storage.appointments import InMemoryAppointmentRepository
@@ -14,11 +14,12 @@ from voice_agent.storage.appointments import InMemoryAppointmentRepository
 pytestmark = pytest.mark.anyio
 
 NOW = datetime(2026, 11, 23, 10, 15)  # Monday
+CLINIC = make_clinic()
 
 
 def _run(model: ScriptedChatModel, extra_tools: list[BaseTool] | None = None) -> Any:
-    tools = build_tools(InMemoryAppointmentRepository(), clock=lambda: NOW) + (extra_tools or [])
-    return build_graph(model, tools, clock=lambda: NOW)
+    tools = build_tools(InMemoryAppointmentRepository(), lambda: NOW, CLINIC) + (extra_tools or [])
+    return build_graph(model, tools, lambda: NOW, CLINIC)
 
 
 def _cfg(session: str) -> RunnableConfig:

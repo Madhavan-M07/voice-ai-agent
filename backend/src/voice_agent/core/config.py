@@ -29,9 +29,15 @@ class Settings(BaseSettings):
     ollama_timeout_s: float = 90.0  # CPU-only 3B model; first call also loads it into RAM
     llm_temperature: float = 0.2
 
-    # Clinic receptionist agent.
-    clinic_timezone: str = "Asia/Kolkata"
+    # Clinic receptionist agent. Everything about the clinic itself (name, hours, doctors,
+    # timezone...) lives in the clinic config file, not here.
+    clinic_config_path: Path = Path("config/clinic.yaml")
     clinic_db_path: Path = Path("data/clinic.db")
+
+    # Agent tuning.
+    agent_max_history_messages: int = 30  # keeps prompts small for the free tier and local model
+    agent_recursion_limit: int = 12  # max agent/tool steps per turn; stops tool-call loops
+    agent_max_slots_listed: int = 8  # keeps spoken availability answers short
 
 
 @lru_cache

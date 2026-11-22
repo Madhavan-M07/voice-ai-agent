@@ -5,8 +5,9 @@ from datetime import datetime
 import pytest
 from langchain_core.tools import BaseTool
 
+from fakes import make_clinic
 from voice_agent.ai.agent.tools import build_tools, normalize_phone
-from voice_agent.storage.appointments import InMemoryAppointmentRepository
+from voice_agent.storage.appointments import InMemoryAppointmentRepository, booking_id_factory
 
 NOW = datetime(2026, 11, 23, 10, 15)  # Monday
 
@@ -15,7 +16,7 @@ NOW = datetime(2026, 11, 23, 10, 15)  # Monday
 def tools() -> dict[str, BaseTool]:
     counter = itertools.count(1001)
     repo = InMemoryAppointmentRepository(id_factory=lambda: f"SFC-{next(counter)}")
-    return {t.name: t for t in build_tools(repo, clock=lambda: NOW)}
+    return {t.name: t for t in build_tools(repo, lambda: NOW, make_clinic())}
 
 
 def _book(tools: dict[str, BaseTool], **overrides: str) -> str:
@@ -136,4 +137,30 @@ def test_cancel_unknown_booking(tools: dict[str, BaseTool]) -> None:
     [("98765 43210", "9876543210"), ("+91-98765-43210", "9876543210"), ("12345", None)],
 )
 def test_normalize_phone(raw: str, expected: str | None) -> None:
-    assert normalize_phone(raw) == expected
+    assert normalize_phone(raw, 10) == expected
+
+
+def test_part_time_doctor_is_skipped_and_cannot_be_booked_on_off_days() -> None:
+    clinic = make_clinic(
+        doctors=[
+            {"id": "dr-rao", "name": "Dr. Meera Rao", "specialty": "GP"},
+            {"id": "dr-lee", "name": "Dr. James Lee", "specialty": "Pediatrician", "days": ["mon"]},
+        ]
+    )
+    tools = {t.name: t for t in build_tools(InMemoryAppointmentRepository(), lambda: NOW, clinic)}
+
+    availability = tools["check_availability"].invoke({"date": "2026-11-24"})  # Tuesday
+    booking = _book(tools, doctor="Lee")
+
+    assert "Dr. James Lee (Pediatrician): not working that day; works Monday." in availability
+    assert "Dr. Meera Rao (GP): 09:00" in availability
+    assert booking.startswith("Error: Dr. James Lee doesn't work on Tuesdays")
+
+
+def test_phone_length_and_booking_prefix_come_from_config() -> None:
+    clinic = make_clinic(phone_digits=8, booking_id_prefix="HTC")
+    repo = InMemoryAppointmentRepository(id_factory=booking_id_factory(clinic.booking_id_prefix))
+    tools = {t.name: t for t in build_tools(repo, lambda: NOW, clinic)}
+
+    assert "8-digit phone" in _book(tools, phone="1234567")
+    assert _book(tools, phone="1234 5678").startswith("Booked. Booking ID HTC-")
