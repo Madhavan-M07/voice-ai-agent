@@ -70,7 +70,8 @@ frontend/       plain HTML/CSS/JS WebRTC client (desktop + mobile), served by Fa
 - Comments explain *why*, not *what*.
 
 ## Git
-- Branch from `main`: `feat/…`, `fix/…`, `chore/…`. Never commit directly to `main`.
+- Solo project: commit and push directly to `main` (owner's decision). Only push when tests, lint and
+  typecheck pass. Commits of ≤5 files, grouped logically. No AI co-author trailers.
 - Conventional Commits: `feat(scope): summary` / `fix(scope): …` / `refactor: …` / `test: …` / `docs: …`.
 - Never force-push, rewrite shared history, or commit `.env`/credentials.
 
