@@ -50,9 +50,14 @@ class ClinicProfile:
                 return doctor
         return None
 
+    @property
+    def open_days(self) -> str:
+        if self.open_weekdays == frozenset(range(5)):
+            return "Monday to Friday"
+        return ", ".join(date(2024, 1, 1 + d).strftime("%A") for d in sorted(self.open_weekdays))
+
     def info(self, topic: str) -> str:
-        days = "Monday to Friday" if self.open_weekdays == frozenset(range(5)) else "selected days"
-        hours = f"{days}, {spoken_time(self.open_time)} to {spoken_time(self.close_time)}"
+        hours = f"{self.open_days}, {spoken_time(self.open_time)} to {spoken_time(self.close_time)}"
         doctors = "; ".join(f"{d.name}, {d.specialty}" for d in self.doctors)
         topics = {
             "hours": f"We are open {hours}. Closed on weekends.",
@@ -112,7 +117,9 @@ def validate_date(day: date, now: datetime, clinic: ClinicProfile = CLINIC) -> N
     if day < today:
         raise SlotError(f"{day.isoformat()} is in the past.")
     if day.weekday() not in clinic.open_weekdays:
-        raise SlotError(f"The clinic is closed on {day.strftime('%A')}s.")
+        raise SlotError(
+            f"The clinic is closed on {day.strftime('%A')}s. We are open {clinic.open_days} only."
+        )
     if day > today + timedelta(days=clinic.booking_window_days):
         raise SlotError(f"Bookings open only {clinic.booking_window_days} days ahead.")
 
