@@ -4,8 +4,6 @@
 ```
 CLAUDE.md                 # Team memory: stack, commands, architecture, rules  (committed)
 CLAUDE.local.md           # Your personal notes for Claude                      (gitignored)
-.mcp.json                 # Project MCP servers (DB, browser, issue tracker…)  (committed)
-.env.example              # Every env var the app reads, with placeholders
 .claude/
   settings.json           # Permissions (allow/ask/deny) + hooks              (committed)
   settings.local.json     # Your personal overrides                          (gitignored)
@@ -21,7 +19,7 @@ CLAUDE.local.md           # Your personal notes for Claude                      
     session-context.js      inject branch/status/recent commits at session start
     guard-shell.js          block destructive shell cmds; ask on risky ones
     protect-files.js        block edits to .env, keys, lockfiles, .git/
-    format-on-edit.js       auto-format edited files with the project's formatter
+    format-on-edit.js       auto-format edited Python files with the project's ruff
 docs/
   architecture.md         # System map (Claude reads before structural changes)
   adr/                    # Architecture Decision Records
@@ -53,6 +51,6 @@ Tips:
 ## Customising for a new project
 1. Fill every `TODO` in `CLAUDE.md` (especially **Commands**) and `docs/architecture.md`.
 2. Trim `permissions.allow` in `.claude/settings.json` to your stack's real commands.
-3. Add MCP servers to `.mcp.json` as needed (e.g. Postgres, Playwright, GitHub).
+3. Add MCP servers in a `.mcp.json` file when you need one (e.g. Postgres, Playwright, GitHub).
 4. Add project-specific rules to `guard-shell.js` / `protect-files.js` (e.g. block `migrations/` edits).
 5. Hooks need Node.js on PATH.

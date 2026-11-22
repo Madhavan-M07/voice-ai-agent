@@ -1,26 +1,30 @@
 #!/usr/bin/env node
-// PostToolUse: auto-format the file Claude just edited, using whichever formatter
-// the project actually has. Silent no-op when no formatter is available. Never blocks.
+// PostToolUse: auto-format the Python file Claude just edited with the project's own ruff
+// (from the nearest pyproject's .venv, so it works without ruff on PATH). Silent no-op when
+// no formatter is found. Never blocks.
 
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const isWin = process.platform === 'win32';
 
-function onPath(bin) {
-  const r = spawnSync(isWin ? 'where' : 'which', [bin], { stdio: 'ignore', shell: isWin });
-  return r.status === 0;
+// Walk up from the edited file to the folder holding pyproject.toml (e.g. backend/).
+function findProjectRoot(file) {
+  let dir = path.dirname(path.resolve(file));
+  while (true) {
+    if (fs.existsSync(path.join(dir, 'pyproject.toml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
 }
-function localBin(name) {
-  const p = path.join(projectDir, 'node_modules', '.bin', isWin ? `${name}.cmd` : name);
-  return fs.existsSync(p) ? p : null;
-}
-function run(cmd, args) {
-  spawnSync(isWin ? `"${cmd}"` : cmd, args.map((a) => (isWin ? `"${a}"` : a)), {
-    cwd: projectDir, stdio: 'ignore', shell: isWin, timeout: 50000,
-  });
+
+function findRuff(root) {
+  const venvRuff = path.join(root, '.venv', isWin ? 'Scripts' : 'bin', isWin ? 'ruff.exe' : 'ruff');
+  if (fs.existsSync(venvRuff)) return venvRuff;
+  const onPath = spawnSync(isWin ? 'where' : 'which', ['ruff'], { stdio: 'ignore', shell: isWin });
+  return onPath.status === 0 ? 'ruff' : null;
 }
 
 let raw = '';
@@ -32,23 +36,15 @@ process.stdin.on('end', () => {
   } catch {
     process.exit(0);
   }
-  if (!file || !fs.existsSync(file)) process.exit(0);
+  if (!file || path.extname(file).toLowerCase() !== '.py' || !fs.existsSync(file)) process.exit(0);
 
-  const ext = path.extname(file).toLowerCase();
-  try {
-    if (['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.json', '.css', '.scss', '.html', '.vue', '.svelte', '.yaml', '.yml'].includes(ext)) {
-      const prettier = localBin('prettier');
-      if (prettier) run(prettier, ['--write', '--log-level', 'silent', file]);
-    } else if (ext === '.py') {
-      if (onPath('ruff')) { run('ruff', ['format', '--quiet', file]); run('ruff', ['check', '--fix', '--quiet', file]); }
-      else if (onPath('black')) run('black', ['-q', file]);
-    } else if (ext === '.go') {
-      if (onPath('gofmt')) run('gofmt', ['-w', file]);
-    } else if (ext === '.rs') {
-      if (onPath('rustfmt')) run('rustfmt', [file]);
-    }
-  } catch {
-    /* formatting is best-effort */
-  }
+  const root = findProjectRoot(file);
+  const ruff = root && findRuff(root);
+  if (!ruff) process.exit(0);
+
+  // cwd = project root so ruff picks up [tool.ruff] from pyproject.toml.
+  const opts = { cwd: root, stdio: 'ignore', timeout: 30000 };
+  spawnSync(ruff, ['format', '--quiet', file], opts);
+  spawnSync(ruff, ['check', '--fix', '--quiet', file], opts);
   process.exit(0);
 });
