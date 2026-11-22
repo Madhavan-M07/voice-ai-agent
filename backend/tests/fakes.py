@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import Field
 
-from voice_agent.ai.agent.clinic import ClinicProfile
+from voice_agent.clinic import ClinicProfile
 
 
 class ScriptedChatModel(BaseChatModel):
